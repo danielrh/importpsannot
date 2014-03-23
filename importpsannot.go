@@ -25,9 +25,9 @@
 
 package main
 import (
-    "bytes"
     "errors"
     "strconv"
+    "regexp"
     "io"
 //    "io/ioutil"
     "log"
@@ -60,47 +60,87 @@ func isBlank(glyph byte) bool {
    return glyph == ' ' || glyph == '\n' || glyph == '\t'
 }
 
-func outputLink(mediaBox []float64,
-                link Annotation,
+type Transform2D struct {
+    AddX float64 // first add
+    AddY float64
+    Scale float64 // then scale
+}
+
+func (transform Transform2D) transform2d(rect []float64) {
+    rectLen := len(rect)
+    for i := 0; i + 1 < rectLen; i += 2 {
+        rect[i] += transform.AddX
+        rect[i] *= transform.Scale
+        rect[i + 1] += transform.AddY
+        rect[i + 1] *= transform.Scale
+    }
+}
+
+func outputLink(link Annotation,
+                transform Transform2D,
                 isUrl bool,
-                output io.Writer,
-                parserState ParserState) error {
+                output io.Writer) error {
     // we only support urls atm
     if isUrl {
-       output.Write([]byte("\n"))
-       output.Write([]byte(link.Data))
+        transform.transform2d(link.Rect[:])
+        io.WriteString(output, "[ ")
+        io.WriteString(output, link.Data)
+        io.WriteString(output, " /Rect [")
+        for _, bound := range(link.Rect) {
+            io.WriteString(output, " ")
+            io.WriteString(output, strconv.FormatFloat(bound, 'f', 4, 64))
+        }
+        io.WriteString(output, " ] /Subtype /Link /ANN pdfmark\n")
     }
     return nil
 }
 
+func getTransform(parserState ParserState, mediaBox []float64) (retval Transform2D){
+    // we want to transform things from the mediabox to things that would fit into the parser state
+    mediaBoxWidth := mediaBox[2] - mediaBox[0]
+    mediaBoxHeight := mediaBox[3] - mediaBox[1]
+    scaleX := parserState.PageSizeX / mediaBoxWidth
+    scaleY := parserState.PageSizeY / mediaBoxHeight
+    mediaBoxMidpointY := (mediaBox[1] + mediaBox[3]) * scaleX * 0.5
+    parserStateMidpointY := parserState.PageSizeY * 0.5
+    _ = scaleY
+    retval.Scale = scaleX
+    retval.AddX = 0
+    retval.AddY = (parserStateMidpointY - mediaBoxMidpointY) / scaleX
+    return
+}
+
 func outputPageLinks(annotations *map[string]Page,
                  output io.Writer,
-                 parserState ParserState) (err error) {
+                 parserState ParserState) error {
    page, ok := (*annotations)[strconv.FormatInt(int64(parserState.PageNumber), 10)]
    if ok {
-       log.Printf("Page %v vs [%f %f]\n", page.MediaBox, parserState.PageSizeX, parserState.PageSizeY)
+       io.WriteString(output, "\ngsave\ninitmatrix\n")
+       transform := getTransform(parserState, page.MediaBox)
+       log.Printf("Page %v vs [%f %f] %v\n", page.MediaBox, parserState.PageSizeX, parserState.PageSizeY, transform)
        var err error
        for _, annotation := range(page.Urls) {
-           err = outputLink(page.MediaBox, annotation, true, output, parserState)
+           err = outputLink(annotation, transform, true, output)
        }
        for _, annotation := range(page.Bookmarks) {
-           err = outputLink(page.MediaBox, annotation, false, output, parserState)
+           err = outputLink(annotation, transform, false, output)
        }
+       io.WriteString(output, "grestore")
        return err
    }
    return nil
 }
 
 func parsePageSize(buffer[] byte) (x,y float64, err error) {
-    firstFloatEnd := bytes.IndexByte(buffer, ' ')
-    secondFloatEnd := bytes.IndexByte(buffer, ']')
-    if firstFloatEnd != -1 && secondFloatEnd != -1 {
-        x, err = strconv.ParseFloat(string(buffer[0 : firstFloatEnd]), 64)
-        if err == nil {
-            y, err = strconv.ParseFloat(string(buffer[firstFloatEnd + 1: secondFloatEnd]), 64)
-        }
+    mediabox_regex := regexp.MustCompile(
+        `\s*\[\s*([-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)` +
+        `\s+([-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)\s*\]`)
+    matches := mediabox_regex.FindSubmatchIndex(buffer)
+    if matches == nil {
+       err = errors.New("No space for page size")
     } else {
-        err = errors.New("No space for page size")
+        x, err = strconv.ParseFloat(string(buffer[matches[2] : matches[3]]), 64)
+        y, err = strconv.ParseFloat(string(buffer[matches[6] : matches[7]]), 64)
     }
     return
 }
@@ -147,8 +187,8 @@ func processPage(annotations *map[string]Page,
             parserState.Comment = true
         }
         page := b0 == '/' && b1 == 'P' && b2 == 'a' && b3 == 'g' && b4 == 'e';
-        if page && b5 == 'S' && b6 == 'i' && b7 == 'z' && b8 == 'e' && b9 =='[' {
-            x, y, perr := parsePageSize(buffer[i + 10 :])
+        if page && b5 == 'S' && b6 == 'i' && b7 == 'z' && b8 == 'e' {
+            x, y, perr := parsePageSize(buffer[i + 9 :])
             if perr == nil {
                 parserState.PageSizeX = x
                 parserState.PageSizeY = y
