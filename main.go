@@ -2,6 +2,7 @@ package main
 import (
     "os"
     "io"
+    "./importpsannot"
     )
 func main() {
     if len(os.Args) < 2 {
@@ -9,5 +10,5 @@ func main() {
        os.Exit(1)
     }
     annotationString := os.Args[1]
-    processAnnotations(annotationString, os.Stdin, os.Stdout)
+    importpsannot.ProcessAnnotations(annotationString, os.Stdin, os.Stdout)
 }

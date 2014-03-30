@@ -23,7 +23,7 @@
 // POSSIBILITY OF SUCH DAMAGE.
 //////////////////////////////////////////////////////////////////////////////////////////////////
 
-package main
+package importpsannot
 import (
     "errors"
     "strconv"
@@ -222,7 +222,7 @@ func processPage(annotations *map[string]Page,
 
 // This function inserts an annotation structure into the input stream and writes it to the output
 // Both input and output streams contain postscript (.ps) data
-func processAnnotations(annotationStringJson string, input io.Reader, output io.Writer) {
+func ProcessAnnotations(annotationStringJson string, input io.Reader, output io.Writer) {
     parserState := ParserState{612.0, 792.0, false, 0, 0, }
     var annotations map[string]Page
     err := json.Unmarshal([]byte(annotationStringJson), &annotations);
