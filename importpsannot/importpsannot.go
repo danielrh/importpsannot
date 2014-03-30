@@ -29,7 +29,6 @@ import (
     "strconv"
     "regexp"
     "io"
-//    "io/ioutil"
     "log"
     "encoding/json"
     )
@@ -45,8 +44,8 @@ type Page struct {
     Urls []Annotation `json:"urls"`
     Bookmarks []Annotation `json:"urls"`
 }
-const circular_buffer_size = 4096 * 1024
-const buffer_search_overlap = 32
+const CIRCULAR_BUFFER_SIZE = 4096 * 1024
+const BUFFER_SEARCH_OVERLAP = 32
 
 type ParserState struct {
    PageSizeX float64
@@ -130,12 +129,12 @@ func outputPageLinks(annotations *map[string]Page,
    }
    return nil
 }
-
-func parsePageSize(buffer[] byte) (x,y float64, err error) {
-    mediabox_regex := regexp.MustCompile(
+var MEDIABOX_REGEX = regexp.MustCompile(
         `\s*\[\s*([-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)` +
         `\s+([-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)\s*\]`)
-    matches := mediabox_regex.FindSubmatchIndex(buffer)
+
+func parsePageSize(buffer[] byte) (x,y float64, err error) {
+    matches := MEDIABOX_REGEX.FindSubmatchIndex(buffer)
     if matches == nil {
        err = errors.New("No space for page size")
     } else {
@@ -148,12 +147,12 @@ func parsePageSize(buffer[] byte) (x,y float64, err error) {
 func processPage(annotations *map[string]Page,
                  buffer []byte,
                  output io.Writer,
-                 parserState ParserState) ParserState {
-    size_flushed := 0
+                 parserState ParserState) (ParserState, error) {
+    sizeFlushed := 0
     var maxTokenSize = 10
     searchLimit := len(buffer) - maxTokenSize
-    if searchLimit > circular_buffer_size {
-        searchLimit = circular_buffer_size
+    if searchLimit > CIRCULAR_BUFFER_SIZE {
+        searchLimit = CIRCULAR_BUFFER_SIZE
     }
     for i := 0; i < searchLimit; i++ {
         b0 := buffer[i + 0]
@@ -197,58 +196,71 @@ func processPage(annotations *map[string]Page,
         }
         show := b1 == 's' && b2 == 'h' && b3 == 'o' && b4 == 'w';
         if show && b5 == 'p' && b6 == 'a' && b7 == 'g' && b8 == 'e' && isBlank(b0) && isBlank(b9) {
-            wrote, err := output.Write(buffer[size_flushed : i])
-            if err != nil || wrote < i - size_flushed {
-               panic(err)
+            wrote, err := output.Write(buffer[sizeFlushed : i])
+            if err != nil || wrote < i - sizeFlushed {
+               if err == nil {
+                   err = errors.New("Wrote less than full number of bytes")
+               }
+               return parserState, err
             }
-            size_flushed = i
+            sizeFlushed = i
             outputPageLinks(annotations, output, parserState)
             parserState.PageNumber += 1
         }
     }
-    if len(buffer) < circular_buffer_size {
-        _, err := output.Write(buffer[size_flushed:])
+    if len(buffer) < CIRCULAR_BUFFER_SIZE {
+        _, err := output.Write(buffer[sizeFlushed:])
         if err != nil {
-            panic(err)
+            return parserState, err
         }
     } else {
-        _, err := output.Write(buffer[size_flushed:circular_buffer_size])
+        _, err := output.Write(buffer[sizeFlushed:CIRCULAR_BUFFER_SIZE])
         if err != nil {
-            panic(err)
+            return parserState, err
         }
     }
-    return parserState
+    return parserState, nil
 }
 
 // This function inserts an annotation structure into the input stream and writes it to the output
 // Both input and output streams contain postscript (.ps) data
-func ProcessAnnotations(annotationStringJson string, input io.Reader, output io.Writer) {
+func ProcessAnnotations(annotationStringJson string, input io.Reader, output io.Writer) error {
     parserState := ParserState{612.0, 792.0, false, 0, 0, }
     var annotations map[string]Page
     err := json.Unmarshal([]byte(annotationStringJson), &annotations);
     if err != nil {
         log.Fatalf("%v\n", err)
     }
-    var buffer [circular_buffer_size + buffer_search_overlap]byte
-    read_start_offset := 0
-    for err == nil || read_start_offset > 0 {
-        copy(buffer[0 : read_start_offset],
-             buffer[circular_buffer_size : circular_buffer_size + read_start_offset])
-        size := read_start_offset
+    var buffer [CIRCULAR_BUFFER_SIZE + BUFFER_SEARCH_OVERLAP]byte
+    readStartOffset := 0
+    for err == nil || readStartOffset > 0 {
+        copy(buffer[0 : readStartOffset],
+             buffer[CIRCULAR_BUFFER_SIZE : CIRCULAR_BUFFER_SIZE + readStartOffset])
+        size := readStartOffset
         for err == nil {
             slice := buffer[size : ]
             if len(slice) == 0 {
                 break
             }
-            cur_read := 0
-            cur_read, err = input.Read(slice)
-            size += cur_read
+            curRead := 0
+            curRead, err = input.Read(slice)
+            size += curRead
         }
-        parserState = processPage(&annotations,
-            buffer[0 : size],
-            output,
-            parserState)
-        read_start_offset = size - circular_buffer_size
+        {
+            var writeError error
+            parserState, writeError = processPage(&annotations,
+                buffer[0 : size],
+                output,
+                parserState)
+            if writeError != nil {
+                err = writeError
+            }
+        }
+        readStartOffset = size - CIRCULAR_BUFFER_SIZE
     }
+    if err == io.EOF {
+        return nil
+    }
+    return err
 }
 

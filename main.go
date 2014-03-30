@@ -10,5 +10,8 @@ func main() {
        os.Exit(1)
     }
     annotationString := os.Args[1]
-    importpsannot.ProcessAnnotations(annotationString, os.Stdin, os.Stdout)
+    err := importpsannot.ProcessAnnotations(annotationString, os.Stdin, os.Stdout)
+    if err != nil {
+        io.WriteString(os.Stderr, "Error during processing:" + err.Error() + "\n")
+    }
 }
