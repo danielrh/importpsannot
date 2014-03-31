@@ -42,7 +42,7 @@ type Annotation struct {
 type Page struct {
     MediaBox []float64    `json:"mediabox"`
     Urls []Annotation `json:"urls"`
-    Bookmarks []Annotation `json:"urls"`
+    Bookmarks []Annotation `json:"bookmarks"`
 }
 const CIRCULAR_BUFFER_SIZE = 4096 * 1024
 const BUFFER_SEARCH_OVERLAP = 32
