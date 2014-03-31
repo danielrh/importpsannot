@@ -121,12 +121,11 @@ func getTransform(parserState ParserState, mediaBox []float64) (retval Transform
     mediaBoxWidth := mediaBox[2] - mediaBox[0]
     mediaBoxHeight := mediaBox[3] - mediaBox[1]
     if ( ((mediaBoxWidth / mediaBoxHeight) > 1) != (parserState.PageSizeX/parserState.PageSizeY > 1)) {
-        scaleX := parserState.PageSizeX / mediaBoxHeight
         scaleY := parserState.PageSizeY / mediaBoxWidth
         retval.Rotate90 = true
         mediaBoxMidpointX := (mediaBox[1] + mediaBox[3]) * scaleY * 0.5
         parserStateMidpointX := parserState.PageSizeX * 0.5
-        retval.Scale = scaleX
+        retval.Scale = scaleY
         retval.AddX = (parserStateMidpointX - mediaBoxMidpointX) / scaleY
         retval.AddY = 0
     } else {
