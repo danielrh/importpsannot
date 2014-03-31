@@ -63,15 +63,36 @@ type Transform2D struct {
     AddX float64 // first add
     AddY float64
     Scale float64 // then scale
+    Rotate90 bool
+    MediaBox []float64
 }
 
 func (transform Transform2D) transform2d(rect []float64) {
     rectLen := len(rect)
     for i := 0; i + 1 < rectLen; i += 2 {
-        rect[i] += transform.AddX
-        rect[i] *= transform.Scale
-        rect[i + 1] += transform.AddY
-        rect[i + 1] *= transform.Scale
+        x := rect[i]
+        y := rect[i + 1]
+        if transform.Rotate90 {
+            cx := 0.5 * (transform.MediaBox[0] + transform.MediaBox[2])
+            cy := 0.5 * (transform.MediaBox[1] + transform.MediaBox[3])
+            x -= cx
+            y -= cy
+            tmp := x
+            x = -y
+            y = tmp
+            x += cy
+            y += cx
+        }
+        x = (x + transform.AddX) * transform.Scale
+        y = (y + transform.AddY) * transform.Scale
+        rect[i] = x
+        rect[i + 1] = y
+    }
+    if transform.Rotate90 {
+        tmp := rect[0]
+        rect[0] = rect[2]
+        rect[2] = tmp
+
     }
 }
 
@@ -96,16 +117,26 @@ func outputLink(link Annotation,
 
 func getTransform(parserState ParserState, mediaBox []float64) (retval Transform2D){
     // we want to transform things from the mediabox to things that would fit into the parser state
+    retval.MediaBox = mediaBox    
     mediaBoxWidth := mediaBox[2] - mediaBox[0]
     mediaBoxHeight := mediaBox[3] - mediaBox[1]
-    scaleX := parserState.PageSizeX / mediaBoxWidth
-    scaleY := parserState.PageSizeY / mediaBoxHeight
-    mediaBoxMidpointY := (mediaBox[1] + mediaBox[3]) * scaleX * 0.5
-    parserStateMidpointY := parserState.PageSizeY * 0.5
-    _ = scaleY
-    retval.Scale = scaleX
-    retval.AddX = 0
-    retval.AddY = (parserStateMidpointY - mediaBoxMidpointY) / scaleX
+    if ( ((mediaBoxWidth / mediaBoxHeight) > 1) != (parserState.PageSizeX/parserState.PageSizeY > 1)) {
+        scaleX := parserState.PageSizeX / mediaBoxHeight
+        scaleY := parserState.PageSizeY / mediaBoxWidth
+        retval.Rotate90 = true
+        mediaBoxMidpointX := (mediaBox[1] + mediaBox[3]) * scaleY * 0.5
+        parserStateMidpointX := parserState.PageSizeX * 0.5
+        retval.Scale = scaleX
+        retval.AddX = (parserStateMidpointX - mediaBoxMidpointX) / scaleY
+        retval.AddY = 0
+    } else {
+        scaleX := parserState.PageSizeX / mediaBoxWidth
+        mediaBoxMidpointY := (mediaBox[1] + mediaBox[3]) * scaleX * 0.5
+        parserStateMidpointY := parserState.PageSizeY * 0.5
+        retval.Scale = scaleX
+        retval.AddX = 0
+        retval.AddY = (parserStateMidpointY - mediaBoxMidpointY) / scaleX
+    }
     return
 }
 
